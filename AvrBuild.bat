@@ -1,0 +1,2 @@
+@ECHO OFF
+"C:\Program Files (x86)\Atmel\AVR Tools\AvrAssembler2\avrasm2.exe" -S "C:\Users\oleg\Desktop\Nekit\avr\labels.tmp" -fI -W+ie -C V2E -o "C:\Users\oleg\Desktop\Nekit\avr\ATMEGA_STOPWATCH.hex" -d "C:\Users\oleg\Desktop\Nekit\avr\ATMEGA_STOPWATCH.obj" -e "C:\Users\oleg\Desktop\Nekit\avr\ATMEGA_STOPWATCH.eep" -m "C:\Users\oleg\Desktop\Nekit\avr\ATMEGA_STOPWATCH.map" "C:\Users\oleg\Desktop\Nekit\avr\ATMEGA_STOPWATCH.asm"
