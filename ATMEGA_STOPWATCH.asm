@@ -42,9 +42,36 @@ rjmp RES_PRESSED ;обработка внешнего прерывания INT1(RESET)
 
 ;***Обработка прерываний***
 START_PRESSED:
+sbrc key_reg, 0	;пропускаем если бит начала отсчета равен 0
+rjmp CHANGE_PARTY
 clr key_reg	; устанавливаем регистр в 0
 ldi key_reg, 1	; разрешаем начало отсчета
 sbr led_reg, (1<<7) ;разрешаем работу индикатора
+rjmp QUIT_SP	;выходим из прерывания
+CHANGE_PARTY:
+ldi temp, 3			;пропускаем следующую команду если номер игрока 4
+cp party_reg, temp
+brsh STOP_SP		;переходим по метке если >=	
+inc party_reg		;увеличиваем номер участника
+clr temp
+rjmp QUIT_SP		;выходим
+STOP_SP:
+ldi temp, 4			;пропускаем следующую команду если выполнено пятое нажатие
+cp party_reg, temp
+breq CLEAN_SP
+inc party_reg		;увеличиваем значение до 4
+ldi key_reg, 3		; устанавливаем паузу и передаем данные
+;передаем данные
+clr temp
+rjmp QUIT_SP
+CLEAN_SP:
+clr party_reg		;очищаем номер участника и ожидаем разрешения на отсчет
+clr key_reg
+clr ms_reg
+clr sec_reg
+clr min_reg
+clr temp
+QUIT_SP:
 reti
 RES_PRESSED:
 clr key_reg ; устанавливаем регистр в 0
@@ -63,13 +90,17 @@ DIVIDE_NUM:
 clr digl
 clr digh
 subi temp, 10	;вычитание 10 из исходного числа
+brlt NEXTD		;если меньше 10 выходим по метке
 LOOP:
 inc digh	;инкремент левой цифры
 subi temp, 10	;вычитание 10 из исходного числа
 brge LOOP		;если >= 10 повторяем
+NEXTD:
 ldi digl,10	;заносим 10 в регистр правой цифры
 add temp, digl	;восстанавливаем значение в регистре
 mov digl, temp	;заносим остаток в регистр правой цифры
+inc digl		;увеличиваем на 1 т.к. символы начинаются с 1
+inc digh
 clr temp		;очищаем временный регистр
 ret
 
@@ -81,10 +112,10 @@ out PORTA, led_reg ; Зажигаем выбранный сегмент
 GO_AWAY:
 ret
 
-;***Подпрограмма задержки 10мс***
+;***Подпрограмма задержки 1.125мс***
 DELAY: 
-ldi r17,42
-d1: ldi r18,150
+ldi r17,2
+d1: ldi r18,186
 d2: dec r18
 brne d2
 dec r17
@@ -117,6 +148,9 @@ out MCUCR,temp ; по низкому уровню
 sei ;глобальное разрешение прерываний
 
 MAIN:
+;***Проверяем кнопки***
+sbrc key_reg, 0	; проверяем, что разрешено начало отсчета(1)
+rjmp COUNT
 ;***Вывод стартовых значений***
 ;****Вывод символов первого участника Р1*****
 ldi led_reg, 0x80	;10000000 включен только бит разрешения
@@ -136,35 +170,118 @@ pop r17
 inc led_reg	; переходим к следующему символу
 dec r17
 brne d11
-;rcall DELAY
+rjmp MAIN
 ;***Конец вывода стартовых значений
+;sbrc key_reg, 2 ; проверяем, что отсутсвует сброс секундомера(0)
+;rjmp MAIN
+;***Считаем время***
+COUNT:
+sbrc key_reg, 1 ; проверяем, что не установлена пауза(0)
+rjmp COUNT
 sbrs key_reg, 0	; проверяем, что разрешено начало отсчета(1)
 rjmp MAIN
-sbrc key_reg, 1 ; проверяем, что не установлена пауза(0)
-rjmp MAIN
-sbrc key_reg, 2 ; проверяем, что отсутсвует сброс секундомера(0)
-rjmp MAIN
-;***Считаем время***
-;****Вызываем задержку****
-;rcall DELAY
-ldi temp, 10	;загружаем предельное значение мс
+ldi led_reg, 0x80	;10000000 включен только бит разрешения
+rcall SET_NUM	; устанавливаем символ P
+rcall DELAY		; задержка
+;****Установка номера участника****
+mov led_reg, party_reg	;заносим номер участника
+inc led_reg			;сдвигаем номер в символах(будет P1 вместо PP)
+inc led_reg
+lsl led_reg		;сдвигаем 3 раза
+lsl led_reg
+lsl led_reg
+inc led_reg 	;выставляем 2 сегмент
+sbr led_reg, (1<<7)	;разрешаем отображение символов
+rcall SET_NUM	; устанавливаем символ 1
+rcall DELAY		; задержка
+;****Выводим минуты****
+;*****Левая цифра******
+mov temp, min_reg	;загружаем количество минут во временный регистр
+rcall DIVIDE_NUM
+mov led_reg, digh	;загружаем частное от деления в регистр
+lsl led_reg		;сдвигаем 3 раза
+lsl led_reg
+lsl led_reg
+sbr led_reg, (1<<7)	;разрешаем отображение символов
+ldi temp, 0x02		;устанавливаем третий сегмент
+add led_reg, temp
+rcall SET_NUM	; устанавливаем символ
+rcall DELAY		; задержка
+;******Правая цифра*****
+mov led_reg, digl	;загружаем остаток от деления в регистр
+lsl led_reg		;сдвигаем 3 раза
+lsl led_reg
+lsl led_reg
+sbr led_reg, (1<<7)	;разрешаем отображение символов
+ldi temp, 0x03		;устанавливаем четвертый сегмент
+add led_reg, temp
+rcall SET_NUM	; устанавливаем символ
+rcall DELAY		; задержка
+;****Выводим секунды****
+;*****Левая цифра******
+mov temp, sec_reg	;загружаем количество секунд во временный регистр
+rcall DIVIDE_NUM
+mov led_reg, digh	;загружаем частное от деления в регистр
+lsl led_reg		;сдвигаем 3 раза
+lsl led_reg
+lsl led_reg
+sbr led_reg, (1<<7)	;разрешаем отображение символов
+ldi temp, 0x04		;устанавливаем третий сегмент
+add led_reg, temp
+rcall SET_NUM	; устанавливаем символ
+rcall DELAY		; задержка
+;******Правая цифра*****
+mov led_reg, digl	;загружаем остаток от деления в регистр
+lsl led_reg		;сдвигаем 3 раза
+lsl led_reg
+lsl led_reg
+sbr led_reg, (1<<7)	;разрешаем отображение символов
+ldi temp, 0x05		;устанавливаем четвертый сегмент
+add led_reg, temp
+rcall SET_NUM	; устанавливаем символ
+rcall DELAY		; задержка
+;****Выводим миллисекунды****
+;*****Левая цифра******
+mov temp, ms_reg	;загружаем количество мс во временный регистр
+rcall DIVIDE_NUM
+mov led_reg, digh	;загружаем частное от деления в регистр
+lsl led_reg		;сдвигаем 3 раза
+lsl led_reg
+lsl led_reg
+sbr led_reg, (1<<7)	;разрешаем отображение символов
+ldi temp, 0x06		;устанавливаем третий сегмент
+add led_reg, temp
+rcall SET_NUM	; устанавливаем символ
+rcall DELAY		; задержка
+;******Правая цифра*****
+mov led_reg, digl	;загружаем остаток от деления в регистр
+lsl led_reg		;сдвигаем 3 раза
+lsl led_reg
+lsl led_reg
+sbr led_reg, (1<<7)	;разрешаем отображение символов
+ldi temp, 0x07		;устанавливаем четвертый сегмент
+add led_reg, temp
+rcall SET_NUM	; устанавливаем символ
+rcall DELAY		; задержка
+ldi temp, 100	;загружаем предельное значение мс
 inc ms_reg		;считаем миллисекунды
 cpse ms_reg, temp	;пропускаем следующую команду если не равны
 rjmp NEXT
 clr ms_reg		;обнуляем регистр мс
-ldi temp, 6	;загружаем предельное значение с
+ldi temp, 60	;загружаем предельное значение с
 inc sec_reg ;считаем секунды
 cpse sec_reg, temp	;пропускаем следующую команду если не равны
 rjmp NEXT
 clr sec_reg	;очищаем регистр с
-ldi temp, 6	;загружаем предельное значение мин
+ldi temp, 60	;загружаем предельное значение мин
 inc min_reg ;считаем минуты
 cpse min_reg, temp	;пропускаем следующую команду если не равны
 rjmp NEXT
 clr min_reg	;при превышении счета в 60 минут происходит обнуление минут
 ;***Конец счета времени***
 NEXT:
-clr temp	;очищаем временный регистр
+rjmp COUNT
+;clr temp	;очищаем временный регистр
 ;rcall DIVIDE_NUM
 ;****Выводим 8 символов на дисплей(справа нелево)****
 ;ldi r17, 8	;цикл на 8 повторов
