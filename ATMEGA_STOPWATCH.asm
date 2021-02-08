@@ -35,11 +35,13 @@
 .def digh = r26			;частное от делени€ числа на 10
 .org $000
 ;***¬екторы прерываний***
-rjmp INIT ;обработка сброса
-;.org $001
-rjmp START_PRESSED ;обработка внешнего прерывани€ INT0(START\LAP)
-;.org $002
-rjmp RES_PRESSED ;обработка внешнего прерывани€ INT1(RESET)
+rjmp INIT 		   	;обработка сброса
+.org $001
+rjmp START_PRESSED 	;обработка внешнего прерывани€ INT0(START\LAP)
+.org $002
+rjmp RES_PRESSED 	;обработка внешнего прерывани€ INT1(RESET)
+.org $00D
+rjmp STOP_PRESSED	;обработка внешнего прерывани€ INT2(STOP)
 
 ;***ќбработка прерываний***
 START_PRESSED:
@@ -59,9 +61,6 @@ rjmp QUIT_SP		;выходим
 STOP_SP:
 sbrc key_reg, 3		; если установлен бит готовности к сбросу
 rjmp CLEAN_SP		; сбрасываем
-;ldi temp, 4			;пропускаем следующую команду если выполнено п€тое нажатие
-;cp party_reg, temp
-;breq CLEAN_SP
 ldi key_reg, 3		; устанавливаем паузу и передаем данные
 sbr key_reg, (1<<3)	; устанавливаем бит готовности к сбросу
 ;передаем данные
@@ -76,6 +75,7 @@ clr min_reg
 clr temp
 QUIT_SP:
 reti
+
 RES_PRESSED:
 clr key_reg ; устанавливаем регистр в 0
 ldi key_reg, (1<<2)	; устанавливаем 2 бит в 1
@@ -85,6 +85,10 @@ clr ms_reg
 clr sec_reg
 clr min_reg
 clr party_reg
+reti
+
+STOP_PRESSED:
+ldi key_reg, 2	;устанавливаем паузу
 reti
 
 ;***ѕодпрограмма разложени€ числа на две цифры***
@@ -142,7 +146,11 @@ clr temp ;инициализаци€ 2-ого и 3-ого выводов
 out DDRD,temp ; порта PD на ввод
 ldi temp,0x1C ;включение Сподт€гивающихТ
 out PORTD,temp ; резисторов порта PD
-ldi temp,(1<<INT0)|(1<<INT1) ;разрешение прерывани€ INT0 и INT1
+clr temp		; инициализаци€ 1-го вывода
+out DDRE, temp	; порта ≈ на ввод
+inc temp		; включение
+out PORTE, temp	; подт€гивающих резисторов
+ldi temp,(1<<INT0)|(1<<INT1)|(1<<INT2) ;разрешение прерывани€ INT0 и INT1 и INT2
 out GICR,temp ; (6 бит GICR или GIMSK)
 ldi temp,0x00 ;обработка прерывани€
 out MCUCR,temp ; по низкому уровню
