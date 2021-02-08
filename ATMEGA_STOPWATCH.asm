@@ -33,6 +33,12 @@
 .def min_reg = r24		;счетчик количества мин
 .def digl = r25 		;остаток от деления числа на 10
 .def digh = r26			;частное от деления числа на 10
+.def eel  = r27			;младший байт адреса EEPROM
+.def eeh  = r28			;старший байт адреса EEPROM
+.def eed  = r29			;байт данных EEPROM
+.equ XTAL = 1000000 	;тактовая частота мк
+.equ baudrate = 4800
+.equ bauddivider = XTAL/(16*baudrate)-1
 .org $000
 ;***Векторы прерываний***
 rjmp INIT 		   	;обработка сброса
@@ -54,19 +60,52 @@ rjmp QUIT_SP	;выходим из прерывания
 CHANGE_PARTY:
 ldi temp, 3			;пропускаем следующую команду если номер игрока 4
 cp party_reg, temp
-brsh STOP_SP		;переходим по метке если >=	
+brsh STOP_SP		;переходим по метке если >=
 inc party_reg		;увеличиваем номер участника
-clr temp
+clr temp			;очищаем временный регистр
+;Запись данных в память
+mov eed, ms_reg		;записываем результаты в память мс
+rcall EEWrite		;запись
+inc eel				;увеличиваем адрес
+mov eed, sec_reg	;записываем результаты в память с
+rcall EEWrite		;запись
+inc eel				;увеличиваем адрес
+mov eed, min_reg	;записываем результаты в память мин
+rcall EEWrite		;запись
+inc eel				;увеличиваем адрес
 rjmp QUIT_SP		;выходим
 STOP_SP:
 sbrc key_reg, 3		; если установлен бит готовности к сбросу
 rjmp CLEAN_SP		; сбрасываем
 ldi key_reg, 3		; устанавливаем паузу и передаем данные
 sbr key_reg, (1<<3)	; устанавливаем бит готовности к сбросу
-;передаем данные
+;Запись данных в память
+mov eed, ms_reg		;записываем результаты в память мс
+rcall EEWrite		;запись
+inc eel				;увеличиваем адрес
+mov eed, sec_reg	;записываем результаты в память с
+rcall EEWrite		;запись
+inc eel				;увеличиваем адрес
+mov eed, min_reg	;записываем результаты в память мин
+rcall EEWrite		;запись
+inc eel				;увеличиваем адрес
+;Передаем данные
+;**Читаем из памяти**
+mov r15, r17		;сохраняем количество итераций
+ldi eel, 0			;устанавливаем нулевой адрес
+ldi r17, 12			;загружаем количество итераций в регистр
+CH_PR:
+rcall EERead		;читаем результат из памяти
+rcall uart_snt		;Передаем по юарт
+inc	eel				;переходим к следующему
+dec r17
+brne CH_PR
+
+mov r15, temp		;возвращаем исходное значение в регистр
 clr temp
 rjmp QUIT_SP
 CLEAN_SP:
+clr eel				;очищаем младший байт адреса
 clr party_reg		;очищаем номер участника и ожидаем разрешения на отсчет
 clr key_reg
 clr ms_reg
@@ -129,8 +168,62 @@ dec r17
 brne d1
 ret
 
+;***Подпрограмма записи данных в EEPROM***
+EEWrite:	
+sbic	EECR,EEWE		; Ждем готовности памяти к записи. Крутимся в цикле
+rjmp	EEWrite 		; до тех пор пока не очистится флаг EEWE
+ 
+;cli						; Затем запрещаем прерывания.
+out 	EEARL,R27 		; Загружаем адрес нужной ячейки
+out 	EEARH,R28  		; старший и младший байт адреса
+out 	EEDR,R29 		; и сами данные, которые нам нужно загрузить
+ 
+sbi 	EECR,EEMWE		; взводим предохранитель
+sbi 	EECR,EEWE		; записываем байт
+;sei						; разрешаем прерывания
+ret 					; возврат из процедуры
+
+;***Подпрограмма чтения данных из EEPROM***
+EERead:	
+sbic 	EECR,EEWE		; Ждем пока будет завершена прошлая запись.
+rjmp	EERead			; также крутимся в цикле.
+out 	EEARL, R27		; загружаем адрес нужной ячейки
+out  	EEARH, R28 		; его старшие и младшие байты
+sbi 	EECR,EERE 		; Выставляем бит чтения
+in 		R29, EEDR 		; Забираем из регистра данных результат
+ret
+
+;***Подпрограмма инициализации UART***
+uart_init:	
+ldi 	temp, low(bauddivider)
+out 	UBRRL,temp
+ldi 	temp, high(bauddivider)
+out 	UBRRH,temp
+ 
+ldi 	temp,0
+out 	UCSRA, temp
+; Прерывания запрещены, прием-передача разрешен.
+ldi 	temp, (1<<RXEN)|(1<<TXEN)|(0<<RXCIE)|(0<<TXCIE)|(0<<UDRIE)
+out 	UCSRB, temp	
+ 
+; Формат кадра - 8 бит, пишем в регистр UCSRC, за это отвечает бит селектор
+ldi 	temp, (1<<URSEL)|(1<<UCSZ0)|(1<<UCSZ1)
+out 	UCSRC, temp
+ret
+
+; Подпрограмма отправки байта
+uart_snt:	
+sbis 	UCSRA,UDRE	; Пропуск если нет флага готовности
+rjmp	uart_snt 	; ждем готовности - флага UDRE
+ 
+out		UDR, eed	; шлем байт
+ret					; Возврат
+
 ;***Инициализация МК***
 INIT:
+clr eel			; очищаем регистр младшего байта для записи EEPROM
+clr eeh			; очищаем регистр старшего байта для записи EEPROM
+clr eed			; очищаем регистр данных для записи EEPROM
 clr party_reg	; записываем первого участника в регистр
 clr key_reg		; очищаем регистр кнопок
 clr ms_reg		; очищаем временные регистры
@@ -140,6 +233,7 @@ ldi temp,Low(RAMEND) ; Инициализация стека
 out SPL,temp
 ldi temp,High(RAMEND)
 out SPH,temp
+rcall uart_init		;инициализируем юарт
 ser temp ; инициализация
 out DDRA,temp ; порта А на вывод
 clr temp ;инициализация 2-ого и 3-ого выводов
